@@ -1,0 +1,9 @@
+
+We can't even compare to their toe hair. Aren't Taiwanese people excellent? No. Aren't Taiwanese people poor? No. Doesn't the government provide subsidies? No. So why? What went wrong? I'm so fucking indignant.
+
+
+CUDA_VISIBLE_DEVICES=0 python -u inference_sample.py --zeroshot --video_path='demo/test1.mp4' --audio_path='demo/audio_test1.wav' --subtitle="We can't even compare to their toe hair. Aren't Taiwanese people excellent? No. Aren't Taiwanese people poor? No. Doesn't the government provide subsidies? No. So why? What went wrong? I'm so fucking indignant." --outside_user_message="Please infer the person's emotional state and provide your reasoning process." --cfg-path=train_configs/mercaptionplus_outputhybird_bestsetup_bestfusion_frame_lz.yaml --options "inference.test_epoch=30"
+
+
+
+In the text, the subtitle content says, "We can't even compare to their toe nails, aren't Taiwanese people good? No, aren't Taiwanese people poor? No, doesn't the government give subsidies? No, so why? I'm so fucking angry." Based on the description of the speaker's voice filled with anger and frustration in the audio clues, as well as the use of vulgar language and aggressive tone, we can infer that this sentence expresses the speaker's anger and dissatisfaction towards a group or an individual. The negative evaluation and questioning in this sentence may be related to the speaker's perception of the situation regarding Taiwanese people and government subsidies. Therefore, this sentence expresses the speaker's anger and dissatisfaction, which aligns with the description of anger and frustration in the audio clue
