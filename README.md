@@ -3,5 +3,4 @@ This work is based on [**AffectGPT**](https://github.com/zeroQiaoba/AffectGPT) a
 
 ## License
 
-This project is released under the Apache 2.0 license as found in the LICENSE file.
-The service is a research preview intended for **non-commercial use ONLY**. Please get in touch with us if you find any potential violations.
+This project is released under the Apache 2.0 license as found in the LICENSE file. The service is a research preview intended for **non-commercial use ONLY**.
