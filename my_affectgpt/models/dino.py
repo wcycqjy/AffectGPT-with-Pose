@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.utils.checkpoint
 from torch.nn.init import trunc_normal_
-
+import einops
 from .dino_layers import Mlp, PatchEmbed, SwiGLUFFNFused, MemEffAttention, NestedTensorBlock as Block
 
 
@@ -189,6 +189,9 @@ class DinoVisionTransformer(nn.Module):
         return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1).to(previous_dtype)
 
     def prepare_tokens_with_masks(self, x, masks=None):
+        batch_size, _, time_length, _, _ = x.size()
+        x = einops.rearrange(x, 'b c t h w -> (b t) c h w')
+        
         B, nc, w, h = x.shape
         x = self.patch_embed(x)
         if masks is not None:

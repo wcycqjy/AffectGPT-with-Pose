@@ -4,7 +4,7 @@ import copy
 import random
 import pandas as pd
 from typing import Dict, Optional, Sequence, Iterable
-
+from torchvision import transforms
 import torch
 from torch.utils.data import Dataset, ConcatDataset
 from my_affectgpt.models.tokenizer import load_tokenizer_from_LLM
@@ -12,7 +12,7 @@ from my_affectgpt.models.tokenizer import load_tokenizer_from_LLM
 import torch
 from PIL import Image
 import numpy as np
-
+import einops
 import transformers
 from my_affectgpt.processors.video_processor import load_video, load_face
 from my_affectgpt.models.ImageBind.data import load_audio, transform_audio
@@ -34,7 +34,14 @@ class BaseDataset():
         self.img_processor = img_processor
         self.model_cfg = model_cfg
         self.dataset_cfg = dataset_cfg
-
+        dino_norm_mean = (0.48145466, 0.4578275, 0.40821073)
+        dino_norm_std = (0.26862954, 0.26130258, 0.27577711)
+        self.pose_transforms = transforms.Compose(
+            [
+                transforms.ToTensor(),
+                transforms.Normalize(dino_norm_mean, dino_norm_std),
+            ]
+        )
         self.image_caption_prompt_candidates = ["Describe this image in detail.",
                                                 "Take a look at this image and describe what you notice.",
                                                 "Please provide a detailed description of the picture.",
@@ -199,7 +206,18 @@ class BaseDataset():
                 return_msg = True
             )
             frame = self.vis_processor.transform(raw_frame) # [3, 8, 224, 224] # 建议可视化，看看这部分数据扩增是否合适
+            # dino_norm_mean = (0.48145466, 0.4578275, 0.40821073)
+            # dino_norm_std = (0.26862954, 0.26130258, 0.27577711)
+            # dino_norm_mean = torch.tensor(dino_norm_mean).view(3, 1, 1, 1)
+            # dino_norm_std = torch.tensor(dino_norm_std).view(3, 1, 1, 1)
+            # pose_frame = frame
+            # # 如果输入是0-255范围的整数，需要先转换为float并除以255
+            # if pose_frame.dtype == torch.uint8:
+            #     pose_frame = pose_frame.float() / 255.0
+            # # 应用向量化归一化
+            # pose_frame = (pose_frame - dino_norm_mean) / dino_norm_std
         sample_data['frame'] = frame
+        sample_data['pose_frames'] = frame
         sample_data['raw_frame'] = raw_frame
         # print (sample_data)
 
@@ -536,10 +554,12 @@ class BaseDataset():
             assert subtitle is not None
             prompt = f"###Human: The audio and video merged info is: <Multi><MultiHere></Multi>. " \
                     + f"The audio content is as follows: <Audio><AudioHere></Audio>. " \
+                    + f"The human pose content is as follows <Pose><PoseHere></Pose>. " \
                     + f"Meanwhile, we uniformly sample raw frames from the video: <Video><FrameHere></Video>. "  \
                     + f"The subtitle of this video is: <Subtitle>{subtitle}</Subtitle>. " \
-                    + f"The human pose content is as follows <Video><PoseHere></Video>. " \
                     + f"Now, please answer my question based on all the provided information. {user_message} ###Assistant: "
+                    # + f"The human pose content is as follows <Video><PoseHere></Video>. " \
+                    # + f"Now, please answer my question based on all the provided information. {user_message} ###Assistant: "
         elif face_or_frame == 'multiface_audio_face_frame_text': # (multi, frame, face, audio, text)
             assert subtitle is not None
             prompt = f"###Human: The audio and video merged info is: <Multi><MultiHere></Multi>. " \

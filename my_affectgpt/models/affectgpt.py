@@ -246,6 +246,7 @@ class AffectGPT(Blip2Base):
 
 
         print('====== Loading Pose Video Encoder(DINOv2) ======')
+        self.num_pose_query_token = num_pose_query_token
         self.pose_encoder = vit_large(patch_size=14, img_size=518, drop_path_rate=0.4, drop_path_uniform=True,
                                  init_values=1.0, block_chunks=0)
         state_dict = torch.load("./models/dinov2_vitl14/dinov2_vitl14_pretrain.pth")
@@ -461,14 +462,50 @@ class AffectGPT(Blip2Base):
         return store_hidden_state, inputs_llama
 
     # 将姿态的时间维度压缩到 1 tokens
+    # def encode_pose_video_mean(self, video, raw_video):
+    #     print(2, type(video))
+    #     device = video.device
+    #     with self.maybe_autocast():
+
+    #         # -> [b, t, q=32, h=768] / [b, t, h]
+    #         image_forward_out = self.pose_encoder(video)
+    #         hidden_state = image_forward_out['x_norm_patchtokens']
+    #         print("pose_hidden_state shape:", hidden_state.shape)
+    #         hidden_state = hidden_state.to(device)
+    #         batch_size, time_length = hidden_state.size()[:2]
+
+
+    #         ## fusion process => [b, h]
+    #         # case1: 输入维度为 [b, t, 32, 768]
+    #         if len(hidden_state.size()) == 4:
+    #             hidden_state = torch.mean(hidden_state, axis=2) # [b, t, h]
+    #             hidden_state = torch.mean(hidden_state, axis=1) # [b, h]
+    #         # case2: 输入维度为 [b, t, 768]
+    #         elif len(hidden_state.size()) == 3:
+    #             hidden_state = torch.mean(hidden_state, axis=1) # [b, h]
+
+    #         # convert to llm inputs => [b, token, llmdim]
+    #         inputs_llama = self.affectgpt_proj(hidden_state) # [b, llmdim]
+    #         inputs_llama = torch.unsqueeze(inputs_llama, 1).expand(-1, self.num_video_query_token, -1) # [b, 16, llmdim]
+
+    #     return inputs_llama
     def encode_pose_video_mean(self, video, raw_video):
         device = video.device
         with self.maybe_autocast():
 
             # -> [b, t, q=32, h=768] / [b, t, h]
-            hidden_state = self.pose_encoder(video, raw_video).to(device)
+            hidden_state = self.visual_encoder(video, raw_video).to(device)
             batch_size, time_length = hidden_state.size()[:2]
 
+            '''
+            修订：获取 hidden state，用于后续的 multimodal fusion process
+            store_hidden_state => [b, t, h]
+            '''
+            store_hidden_state = ""
+            if len(hidden_state.size()) == 4:
+                store_hidden_state = einops.rearrange(hidden_state, 'b t q h -> b (t q) h', b=batch_size, t=time_length)
+            elif len(hidden_state.size()) == 3:
+                store_hidden_state = hidden_state
 
             ## fusion process => [b, h]
             # case1: 输入维度为 [b, t, 32, 768]
@@ -481,10 +518,10 @@ class AffectGPT(Blip2Base):
 
             # convert to llm inputs => [b, token, llmdim]
             inputs_llama = self.affectgpt_proj(hidden_state) # [b, llmdim]
+            print("1 inputs_llama.shape: ", inputs_llama.shape)
             inputs_llama = torch.unsqueeze(inputs_llama, 1).expand(-1, self.num_video_query_token, -1) # [b, 16, llmdim]
-
-        return inputs_llama
-
+            print("2 inputs_llama.shape: ", inputs_llama.shape)
+        return store_hidden_state, inputs_llama
         
     # 将视频的时间维度压缩到 1 tokens
     def encode_video_attention(self, video, raw_video):
@@ -702,7 +739,7 @@ class AffectGPT(Blip2Base):
     Now answer my question based on what you have seen, heard, and subtitles. {user_message} ###Assistant:
     '''
     def forward(self, samples):
-
+        print(f"============================================ Start Foward==========================")
         self.face_or_frame = samples['face_or_frame'] # 把这个参数传出来
         frame_llms, face_llms, audio_llms, image_llms, multi_llms = None, None, None, None, None
         if 'frames' in samples: 
@@ -744,6 +781,13 @@ class AffectGPT(Blip2Base):
                                                                 (self.POSE_PATCH_TOKEN_ID, self.num_pose_query_token, pose_frame_llms),
                                                                 (self.IMAGE_PATCH_TOKEN_ID, self.num_image_query_token, image_llms),
                                                                 ]:
+        # for cur_input_ids, cur_input_embeds in zip(input_ids, temp_input_embedding):
+        #     for (patch_token_id, query_token_number, embeds) in [(self.FRAME_PATCH_TOKEN_ID, self.num_video_query_token, frame_llms),
+        #                                                         (self.FACE_PATCH_TOKEN_ID,  self.num_video_query_token, face_llms),
+        #                                                         (self.AUDIO_PATCH_TOKEN_ID, self.num_audio_query_token, audio_llms),
+        #                                                         (self.MULTI_PATCH_TOKEN_ID, self.num_multi_query_token, multi_llms),
+        #                                                         (self.IMAGE_PATCH_TOKEN_ID, self.num_image_query_token, image_llms),
+        #                                                         ]:
                 if (cur_input_ids == patch_token_id).sum() != 0:
                     assert embeds is not None, f'Some input info is missing.'
                     cur_features = embeds[cur_idx]

@@ -199,6 +199,7 @@ if __name__ == "__main__":
         frame_hiddens, frame_llms = chat.postprocess_frame(sample_data)
         face_hiddens,  face_llms  = chat.postprocess_face(sample_data)
         _,             image_llms = chat.postprocess_image(sample_data)
+        pose_hiddens, pose_llms = chat.postprocess_pose_frame(sample_data)
         if face_or_frame.startswith('multiface'):
             _, multi_llms = chat.postprocess_multi(face_hiddens, audio_hiddens)
         elif face_or_frame.startswith('multiframe'):
@@ -208,8 +209,10 @@ if __name__ == "__main__":
         img_list['audio'] = audio_llms
         img_list['frame'] = frame_llms
         img_list['face']  = face_llms
+        img_list['pose'] =  pose_llms
         img_list['image'] = image_llms
         img_list['multi'] = multi_llms
+        
 
         # get prompt (if use zeroshot => ov labels; else => dataset specific question)
         user_message = get_user_message(dataset_cls, args.zeroshot, args.outside_user_message)

@@ -127,6 +127,7 @@ class Chat:
         self.num_audio_query_token = model_cfg.num_audio_query_token
         self.num_multi_query_token = model_cfg.num_multi_query_token
         self.num_image_query_token = model_cfg.num_image_query_token
+        self.num_pose_query_token = model_cfg.num_pose_query_token
 
 
     def to_token_ids(self, text, max_length):
@@ -141,14 +142,22 @@ class Chat:
     def replace_token_for_multimodal(self, prompt):
         replace_token = config.DEFAULT_FRAME_PATCH_TOKEN * self.num_video_query_token
         prompt = prompt.replace(config.DEFAULT_FRAME_PATCH_TOKEN, replace_token)
+        
         replace_token = config.DEFAULT_FACE_PATCH_TOKEN * self.num_video_query_token
         prompt = prompt.replace(config.DEFAULT_FACE_PATCH_TOKEN, replace_token)
+        
         replace_token = config.DEFAULT_AUDIO_PATCH_TOKEN * self.num_audio_query_token
         prompt = prompt.replace(config.DEFAULT_AUDIO_PATCH_TOKEN, replace_token)
+
+        replace_token = config.DEFAULT_POSE_PATCH_TOKEN * self.num_pose_query_token
+        prompt = prompt.replace(config.DEFAULT_POSE_PATCH_TOKEN, replace_token)
+        
         replace_token = config.DEFAULT_MULTI_PATCH_TOKEN * self.num_multi_query_token
         prompt = prompt.replace(config.DEFAULT_MULTI_PATCH_TOKEN, replace_token)
+        
         replace_token = config.DEFAULT_IMAGE_PATCH_TOKEN * self.num_image_query_token
         prompt = prompt.replace(config.DEFAULT_IMAGE_PATCH_TOKEN, replace_token)
+        
         return prompt
    
     def postprocess_audio(self, sample_data):
@@ -177,6 +186,18 @@ class Chat:
         raw_video = sample_data['raw_frame'].unsqueeze(0).to(self.device) # [1, 3, 8, 224, 224]
         frame_hiddens, frame_llms = self.model.encode_video_merge(video, raw_video)
         return frame_hiddens, frame_llms
+
+
+    def postprocess_pose_frame(self, sample_data):
+        if sample_data['pose_frames'] is None:
+            return None, None
+        
+        pose_frames = sample_data['pose_frames'].unsqueeze(0).to(self.device) # [1, 3, 8, 224, 224]
+        print("1", type(pose_frames))
+        raw_video = sample_data['raw_frame'].unsqueeze(0).to(self.device) # [1, 3, 8, 224, 224]
+        frame_hiddens, frame_llms = self.model.encode_pose_video_mean(pose_frames, raw_video)
+        return frame_hiddens, frame_llms
+
 
     def postprocess_image(self, sample_data):
         if sample_data['image'] is None:
@@ -207,6 +228,11 @@ class Chat:
         FACE_PATCH_TOKEN_ID  = self.tokenizer.get_vocab()[config.DEFAULT_FACE_PATCH_TOKEN]
         MULTI_PATCH_TOKEN_ID = self.tokenizer.get_vocab()[config.DEFAULT_MULTI_PATCH_TOKEN]
 
+        ###
+        print("Load Pose token")
+        POSE_PATCH_TOKEN_ID = self.tokenizer.get_vocab()[config.DEFAULT_POSE_PATCH_TOKEN]
+
+        
         ###### step1: => (input_id, attention_mask) 
         ## replace and add
         prompt = self.replace_token_for_multimodal(prompt)
@@ -227,6 +253,7 @@ class Chat:
         temp_input_id[temp_input_id == FRAME_PATCH_TOKEN_ID] = 0
         temp_input_id[temp_input_id == FACE_PATCH_TOKEN_ID]  = 0
         temp_input_id[temp_input_id == AUDIO_PATCH_TOKEN_ID] = 0
+        temp_input_id[temp_input_id == POSE_PATCH_TOKEN_ID] = 0
         temp_input_id[temp_input_id == MULTI_PATCH_TOKEN_ID] = 0
         temp_input_id[temp_input_id == IMAGE_PATCH_TOKEN_ID] = 0
         cur_input_embeds = self.model.llama_model.model.model.embed_tokens(temp_input_id)
@@ -234,13 +261,22 @@ class Chat:
         
         # replace <ImageHere>, <AudioHere>, <FrameHere>, <FaceHere> with features
         cur_idx = 0
+        # for (patch_token_id, query_token_number, embeds) in [(FRAME_PATCH_TOKEN_ID, self.num_video_query_token, img_list['frame']),
+        #                                                     (FACE_PATCH_TOKEN_ID,  self.num_video_query_token, img_list['face']),
+        #                                                     (AUDIO_PATCH_TOKEN_ID, self.num_audio_query_token, img_list['audio']),
+        #                                                     (MULTI_PATCH_TOKEN_ID, self.num_multi_query_token, img_list['multi']),
+        #                                                     (IMAGE_PATCH_TOKEN_ID, self.num_image_query_token, img_list['image']),
+        #                                                     ]:
+        iteration_num = 0
         for (patch_token_id, query_token_number, embeds) in [(FRAME_PATCH_TOKEN_ID, self.num_video_query_token, img_list['frame']),
-                                                            (FACE_PATCH_TOKEN_ID,  self.num_video_query_token, img_list['face']),
-                                                            (AUDIO_PATCH_TOKEN_ID, self.num_audio_query_token, img_list['audio']),
-                                                            (MULTI_PATCH_TOKEN_ID, self.num_multi_query_token, img_list['multi']),
-                                                            (IMAGE_PATCH_TOKEN_ID, self.num_image_query_token, img_list['image']),
-                                                            ]:
+                                                        (FACE_PATCH_TOKEN_ID,  self.num_video_query_token, img_list['face']),
+                                                        (AUDIO_PATCH_TOKEN_ID, self.num_audio_query_token, img_list['audio']),
+                                                        (MULTI_PATCH_TOKEN_ID, self.num_multi_query_token, img_list['multi']),
+                                                        (POSE_PATCH_TOKEN_ID, self.num_pose_query_token, img_list['pose']),
+                                                        (IMAGE_PATCH_TOKEN_ID, self.num_image_query_token, img_list['image']),
+                                                        ]:
             if (cur_input_ids == patch_token_id).sum() != 0:
+                print(f"{iteration_num} Iteration===========")
                 assert embeds is not None, f'Some input info is missing.'
                 cur_features = embeds[cur_idx]
                 if (cur_input_ids == patch_token_id).sum() != query_token_number:
@@ -249,10 +285,15 @@ class Chat:
                 mask_index_start = masked_indices[0]
                 if (masked_indices != torch.arange(mask_index_start, mask_index_start+query_token_number, device=masked_indices.device, dtype=masked_indices.dtype)).any():
                     raise ValueError("The image patch tokens should be consecutive.")
+
+                print("mask_index_start: ", mask_index_start)
+                print("cur_input_embeds.shape: ", cur_input_embeds.shape)
+                print("cur_features.shape: ", cur_features.shape)
+                print("query_token_number: ", query_token_number)
                 cur_input_embeds = torch.cat((cur_input_embeds[:mask_index_start], 
                                             cur_features, 
                                             cur_input_embeds[mask_index_start+query_token_number:]), dim=0)
-                    
+            iteration_num = iteration_num + 1            
         cur_input_embeds = cur_input_embeds.unsqueeze(0) 
         attention_mask = attention_mask.unsqueeze(0) 
         ###### step3: (inputs_embeds, attention_masks) => response
